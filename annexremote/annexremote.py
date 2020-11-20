@@ -519,6 +519,10 @@ class ExportRemote(SpecialRemote):
         """
         raise UnsupportedRequest()
         
+class ImportExportRemote(SpecialRemote):
+    def importsupported(self):
+        return True
+
 class Protocol(object):
     """
     Helper class handling the receiving part of the protocol (git-annex to remote)
@@ -716,7 +720,7 @@ class Protocol(object):
             return "EXPORTSUPPORTED-SUCCESS"
         else:
             return "EXPORTSUPPORTED-FAILURE"
-    
+
     def do_EXPORT(self, name):
         self.exporting = name
     
@@ -785,6 +789,146 @@ class Protocol(object):
             return "RENAMEEXPORT-FAILURE {key}".format(key=key)
         else:
             return "RENAMEEXPORT-SUCCESS {key}".format(key=key)
+
+    def do_IMPORTSUPPORTED(self):
+        if hasattr(self.remote, "importsupported") and callable(
+                self.remote.importsupported) and self.remote.importsupported():
+            return "IMPORTSUPPORTED-SUCCESS"
+        else:
+            return "IMPORTSUPPORTED-FAILURE"
+
+    def do_IMPORTKEYSUPPORTED(self):
+        if hasattr(self.remote, "importkeysupported") and callable(
+                self.remote.importkeysupported) and self.remote.importkeysupported():
+            return "IMPORTKEYSUPPORTED-SUCCESS"
+        else:
+            return "IMPORTKEYSUPPORTED-FAILURE"
+
+    def do_LISTIMPORTABLECONTENTS(self):
+        """
+        Used to get a list of all the files that are stored in the special remote. A block of responses can be made to this,
+        which must always end with END.
+
+        CONTENT Size Name
+            A file stored in the special remote. The Size is its size in bytes. The Name is the name of the file on the remote, in the form of a relative path, and may contain path separators, whitespace, and other special characters.
+            Always followed by CONTENTIDENTIFIER.
+        CONTENTIDENTIFIER ContentIdentifier
+            Provide the ContentIdentifier for the previous CONTENT.
+        HISTORY
+            When a special remote stores historical versions of files, this can be used to list those versions. It opens a new block of responses. This can be repeated any number of times (indicating a branching history), and histories can also be nested multiple levels deep.
+        END
+            Indicates the end of a block of responses.
+        """
+        raise UnsupportedRequest()
+
+    def do_LOCATION(self, name):
+        """
+        LOCATION Name
+            Comes before each of the following requests (except for REMOVEEXPORTDIRECTORYWHENEMPTY), specifying the name
+            of the file on the remote.
+            It will be in the form of a relative path, and may contain path separators, whitespace,
+            and other special characters.
+
+            No response is made to this message.
+        """
+        raise UnsupportedRequest()
+
+    def do_EXPECTED(self, content_id):
+        """
+        EXPECTED ContentIdentifier
+            Comes before each of the following requests (except for REMOVEEXPORTDIRECTORYWHENEMPTY),
+            specifying the ContentIdentifier that is expected to be present on the remote.
+        """
+        raise UnsupportedRequest()
+
+    def do_NOTHINGEXPECTED(self):
+        """
+        NOTHINGEXPECTED
+            If no ContentIdentifier is expected to be present, this is sent rather than EXPECTED.
+        """
+        raise UnsupportedRequest()
+
+    def do_IMPORTKEY(self, file):
+        """
+        IMPORTKEY File
+        This only needs to be implemented if IMPORTKEYSUPPORTED indicates it is supported.
+        And if a remote did not support it before, adding it will make importing the same content as before generate
+        a likely different tree, which can lead to merge conflicts. So be careful implementing this.
+        Generates a key by querying the remote for eg, a checksum. (See key format for details of how to format a key.)
+        Any kind of key can be generated, depending on what the remote can support.
+        The user expects this to be reasonably fast and not use a lot of disk space. It should not download the
+        whole content of the file from the remote.
+        Must take care to generate a key for the same content as the ContentIdentifier specified by EXPECTED, or otherwise fail.
+        Replies:
+
+            IMPORTKEY-SUCCESS Key
+            IMPORTKEY-FAILURE ErrorMsg
+        """
+        raise UnsupportedRequest()
+
+    def do_RETRIEVEEXPORTEXPECTED(self, file):
+        """
+        RETRIEVEEXPORTEXPECTED File
+        Retrieves the content of a file from the special remote to the File on local disk. Must take care to only retrieve content that has the ContentIdentifier specified by EXPECTED.
+        While the transfer is running, the remote can send any number of PROGRESS messages. Once the transfer is complete, it finishes by sending one of these replies:
+
+            RETRIEVE-SUCCESS Indicates that the retrieve was successful.
+            RETRIEVE-FAILURE ErrorMsg
+            Indicates the retrieve failed.
+        """
+        raise UnsupportedRequest()
+
+    def do_STOREEXPORTEXPECTED(self, key, file):
+        """
+        STOREEXPORTEXPECTED Key File
+        Stores the content of File on the local disk to the previously provided Name on the remote. If the Name already exists on the remote, must take care to only overwrite it when it has the ContentIdentifier that was previously provided by EXPECTED. If some other content has been written to the Name, it should not overwrite it.
+        While the transfer is running, the remote can send any number of PROGRESS messages. Once the transfer is complete, it finishes by sending one of these replies:
+
+            STORE-SUCCESS Key ContentIdentifier Indicates that the store was successful. The ContentIdentifier must be for the content that was stored.
+            STORE-FAILURE Key ErrorMsg
+            Indicates the store failed.
+        """
+        raise UnsupportedRequest()
+
+    def do_CHECKPRESENTEXPORTEXPECTED(self, key):
+        """
+        CHECKPRESENTEXPORTEXPECTED Key
+        Requests the remote to check if the previously provided Name is present in it, and still has the ContentIdentifier that was previously provided by EXPECTED.
+
+            CHECKPRESENT-SUCCESS Key
+            Indicates that a content has been positively verified to be present in the remote.
+            CHECKPRESENT-FAILURE Key
+            Indicates that a content has been positively verified to not be present in the remote, or does not have the expected ContentIdentifier.
+            CHECKPRESENT-UNKNOWN Key ErrorMsg
+            Indicates that it is not currently possible to verify if content is present in the remote. (Perhaps the remote cannot be contacted.)
+        """
+        raise UnsupportedRequest()
+
+    def do_REMOVEEXPORTEXPECTED(self, key):
+        """
+        REMOVEEXPORTEXPECTED Key
+        Requests the remote to remove the content at the previously provided Name, but only when it matches the ContentIdentifier that was provided by EXPECTED.
+
+            REMOVE-SUCCESS Key
+            Indicates the content has been removed from the remote. May be returned when the content was already not present.
+            REMOVE-FAILURE Key ErrorMsg
+            Indicates that the content was unable to be removed from the remote, either because of an access problem, or because it did not match the ContentIdentifier.
+        """
+        raise UnsupportedRequest()
+
+    def do_REMOVEEXPORTDIRECTORYWHENEMPTY(self, direcoty):
+        """
+        REMOVEEXPORTDIRECTORYWHENEMPTY Directory
+        Requests the remote remove an exported directory, so long as it's empty.
+        If the remote does not use directories, or REMOVEEXPORTEXPECTED cleans up directories that are empty, this does not need to be implemented.
+        The directory will be in the form of a relative path, and may contain path separators, whitespace, and other special characters.
+
+            REMOVEEXPORTDIRECTORY-SUCCESS
+            Indicates that the directory was removed, or was not empty.
+            REMOVEEXPORTDIRECTORY-FAILURE
+            Indicates that the directory was empty, but could not be removed for some reason.
+        """
+        raise UnsupportedRequest()
 
 class Master(object):
     """
